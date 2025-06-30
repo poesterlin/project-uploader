@@ -134,7 +134,18 @@ fn run_build(config: &Config) -> Result<(), ()> {
     if let Some(command) = &config.build_command {
         println!("RUNNING BUILD COMMAND: {}", command);
 
-        let command_result = Command::new("cmd").args(&["/C", command]).status();
+        let command_result = {
+            #[cfg(target_os = "windows")]
+            {
+                Command::new("cmd").args(&["/C", command]).status()
+            }
+
+            #[cfg(not(target_os = "windows"))]
+            {
+                // On Unix-like systems, use 'sh -c'
+                Command::new("sh").arg("-c").arg(command).status()
+            }
+        };
         println!("\n\n");
 
         return match command_result {
