@@ -225,7 +225,9 @@ fn zip_output<'a>(base_path: &PathBuf, config: &Config) -> PathBuf {
 
 fn upload_zip(zip: PathBuf, config: &Config) {
     let domain = &config.domain.to_owned().expect("DOMAIN NOT SET");
+
     let form = multipart::Form::new()
+        .text("domain", domain.clone())
         .file("zip", &zip)
         .expect("FROM COULD NOT BE CREATED");
 
@@ -243,7 +245,11 @@ fn upload_zip(zip: PathBuf, config: &Config) {
             if response.status().is_success() {
                 println!("UPLOAD SUCCESSFUL");
             } else {
-                println!("UPLOAD FAILED: {}", response.status());
+                println!(
+                    "UPLOAD FAILED: {}: {}",
+                    response.status(),
+                    response.text().unwrap_or_default()
+                );
             }
         }
         Err(err) => println!("ERROR UPLOADING, {}", err),
