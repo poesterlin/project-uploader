@@ -69,7 +69,7 @@ fn main() -> () {
     }
 
     if let Some(domain) = &config.domain {
-        if !domain.starts_with("https://") {
+        if !domain.starts_with("http") {
             config.domain = Some(format!("https://{}", domain));
         }
     }
