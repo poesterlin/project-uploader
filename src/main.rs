@@ -14,6 +14,7 @@ struct Config {
     directory: Option<String>,
     domain: Option<String>,
     auth: Option<String>,
+    endpoint: Option<String>,
 }
 
 impl Config {
@@ -23,16 +24,18 @@ impl Config {
             directory: Some("build".into()),
             domain: None,
             auth: None,
+            endpoint: None,
         }
     }
 
     fn to_string(&self) -> String {
         let not_set = String::from("not set");
         return format!(
-            "\tDomain: {},\n\tOutput Directory: {},\n\tBuild Command: {}\n\n",
+            "\tDomain: {},\n\tOutput Directory: {},\n\tBuild Command: {},\n\tEndpoint: {}\n\n",
             self.domain.clone().unwrap_or(not_set.clone()),
             self.directory.clone().unwrap_or(not_set.clone()),
-            self.build_command.clone().unwrap_or(not_set)
+            self.build_command.clone().unwrap_or(not_set.clone()),
+            self.endpoint.clone().unwrap_or(not_set.clone()),
         );
     }
 }
@@ -71,6 +74,16 @@ fn main() -> () {
     if let Some(domain) = &config.domain {
         if !domain.starts_with("http") {
             config.domain = Some(format!("https://{}", domain));
+        }
+    }
+
+    if config.endpoint.is_none() || is_default {
+        config.endpoint = read_from_stdin(String::from("SET THE ENDPOINT"), config.endpoint);
+    }
+
+    if let Some(endpoint) = &config.endpoint {
+        if !endpoint.starts_with("http") {
+            config.endpoint = Some(format!("https://{}", endpoint));
         }
     }
 
@@ -189,12 +202,15 @@ fn zip_output<'a>(base_path: &PathBuf, config: &Config) -> PathBuf {
 
     let walk = walkdir::WalkDir::new(&path);
 
-    let mut buffer = Vec::new();
+    // No need for a single global buffer now, or at least a much smaller one
+    // let mut buffer = Vec::new(); // <--- Remove or keep a small buffer for chunks
+    let mut buffer = [0; 4096]; // A small, fixed-size buffer for reading chunks
+
     let dir_with_slash = format!("{}/", dir);
 
     for entry in walk.into_iter().filter_map(|e| e.ok()) {
-        let path = entry.path();
-        let name = path
+        let entry_path = entry.path(); // Renamed to avoid confusion with `path` argument
+        let name = entry_path
             .strip_prefix(&base_path)
             .expect("COULD NOT STRIP PREFIX");
 
@@ -208,12 +224,17 @@ fn zip_output<'a>(base_path: &PathBuf, config: &Config) -> PathBuf {
             zip.start_file(&name, SimpleFileOptions::default())
                 .expect("COULD NOT START FILE");
 
-            let mut file = fs::File::open(path).expect("COULD NOT OPEN FILE");
-            file.read_to_end(&mut buffer).expect("COULD NOT READ FILE");
-
-            zip.write(&buffer).expect("COULD NOT WRITE FILE");
-
-            buffer.clear();
+            let mut file = fs::File::open(entry_path).expect("COULD NOT OPEN FILE"); // Use entry_path here
+            
+            // Read in chunks and write to zip
+            loop {
+                let bytes_read = file.read(&mut buffer).expect("COULD NOT READ FILE CHUNK");
+                if bytes_read == 0 {
+                    break; // End of file
+                }
+                zip.write_all(&buffer[..bytes_read]).expect("COULD NOT WRITE FILE CHUNK");
+            }
+            // buffer.clear(); // Not needed if using a fixed-size array or clearing properly for Vec
         }
     }
 
@@ -225,6 +246,7 @@ fn zip_output<'a>(base_path: &PathBuf, config: &Config) -> PathBuf {
 
 fn upload_zip(zip: PathBuf, config: &Config) {
     let domain = &config.domain.to_owned().expect("DOMAIN NOT SET");
+    let endpoint = &config.endpoint.to_owned().expect("ENDPOINT NOT SET");
 
     let form = multipart::Form::new()
         .text("domain", domain.clone())
@@ -235,7 +257,7 @@ fn upload_zip(zip: PathBuf, config: &Config) {
 
     let client = reqwest::blocking::Client::new();
     let resp = client
-        .post(domain)
+        .post(endpoint)
         .header(AUTHORIZATION, auth)
         .multipart(form)
         .send();
